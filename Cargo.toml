@@ -6,6 +6,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+chrono = "0.4.19"
 reqwest = { version = "0.11.4", features = ["json"] }
 serde = { version = "1.0.127", features = ["derive"] }
+skiplist = "0.4.0"
 tokio = { version = "1", features = ["full"] }
