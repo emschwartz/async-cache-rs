@@ -3,6 +3,17 @@
 version = 3
 
 [[package]]
+name = "async-cache"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "priority-queue",
+ "reqwest",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -483,17 +494,6 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
-]
-
-[[package]]
-name = "oso-async-cache"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "priority-queue",
- "reqwest",
- "serde",
- "tokio",
 ]
 
 [[package]]
