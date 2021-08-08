@@ -40,6 +40,16 @@ where
     }
 
     #[inline]
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        self.map.capacity()
+    }
+
+    #[inline]
     pub fn get(&self, key: &Key) -> Option<&Val> {
         self.map.get(key).map(|(val, _)| val)
     }
@@ -128,5 +138,64 @@ where
         if let Some(key) = key {
             self.map.remove(&key);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn basic_get_set() {
+        let mut cache = SyncCache::with_capacity(5);
+        cache.set("a", 1, Duration::hours(1));
+        cache.set("b", 2, Duration::hours(1));
+
+        assert_eq!(cache.get(&"a"), Some(&1));
+        assert_eq!(cache.get(&"b"), Some(&2));
+    }
+
+    #[test]
+    fn has_expired_items() {
+        let mut cache = SyncCache::with_capacity(5);
+        assert_eq!(cache.has_expired_items(), false);
+
+        cache.set("a", 1, Duration::hours(1));
+        assert_eq!(cache.has_expired_items(), false);
+
+        cache.set("b", 2, Duration::milliseconds(-1));
+        assert_eq!(cache.has_expired_items(), true);
+
+        cache.set("c", 2, Duration::hours(-1));
+        assert_eq!(cache.has_expired_items(), true);
+    }
+
+    #[test]
+    fn remove_expired_items() {
+        let mut cache = SyncCache::with_capacity(5);
+        cache.set("a", 1, Duration::hours(-1));
+        cache.set("b", 2, Duration::hours(1));
+        cache.set("c", 3, Duration::milliseconds(-1));
+        cache.set("d", 4, Duration::days(1));
+
+        cache.remove_expired_items();
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.get(&"a"), None);
+        assert_eq!(cache.get(&"b"), Some(&2));
+        assert_eq!(cache.get(&"c"), None);
+        assert_eq!(cache.get(&"d"), Some(&4));
+    }
+
+    #[test]
+    fn eviction() {
+        let mut cache = SyncCache::with_capacity(3);
+        cache.set("a", 1, Duration::hours(1));
+        cache.set("b", 2, Duration::minutes(1));
+        cache.set("c", 3, Duration::seconds(1));
+        cache.set("d", 4, Duration::days(1));
+
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache.get(&"c"), None);
+        assert_eq!(cache.get(&"d"), Some(&4));
     }
 }
