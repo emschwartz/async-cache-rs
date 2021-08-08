@@ -1,7 +1,9 @@
 use crate::sync_cache::SyncCache;
 use chrono::Duration;
+use std::future::Future;
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -55,5 +57,35 @@ where
 
     pub async fn clear(&mut self) {
         self.cache.write().await.clear()
+    }
+
+    // Returns a version of the given function that caches the return values
+    // using the input as the Key and the returned Duration as the value's TTL
+    pub fn cache_fn<'a, Fut, ErrType>(
+        &self,
+        f: fn(Key) -> Fut,
+    ) -> impl Fn(Key) -> Pin<Box<dyn Future<Output = Result<Val, ErrType>> + 'a>> + 'a
+    where
+        Key: 'a,
+        Val: 'a,
+        // TODO maybe use std::time::Duration or u32 in the function signature
+        // TODO maybe define a trait like GetTtl on the return type instead of requiring it to be a tuple
+        Fut: Future<Output = Result<(Val, Duration), ErrType>> + 'static,
+    {
+        let cache = self.cache.clone();
+        move |key| {
+            let cache = cache.clone();
+            Box::pin(async move {
+                {
+                    if let Some(val) = cache.read().await.get(&key) {
+                        return Ok(val.clone());
+                    }
+                }
+
+                let (val, ttl) = f(key.clone()).await?;
+                cache.write().await.set(key, val.clone(), ttl);
+                Ok(val)
+            })
+        }
     }
 }
