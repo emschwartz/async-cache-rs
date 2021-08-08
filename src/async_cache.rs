@@ -7,6 +7,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+// Async, thread-safe cache that uses a RwLock
+// to guard access to a SyncCache
 #[derive(Clone)]
 pub struct AsyncCache<Key: Eq + Hash, Val> {
     cache: Arc<RwLock<SyncCache<Key, Val>>>,

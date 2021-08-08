@@ -21,7 +21,7 @@ enum Response {
 #[tokio::main]
 async fn main() {
     let cache = AsyncCache::new();
-    let square_cache = cache.cache_fn(|num: i32| async move {
+    let square = |num: i32| async move {
         let response = reqwest::get(format!("http://localhost:5000/squareme?num={}", num))
             .await
             .unwrap()
@@ -32,7 +32,8 @@ async fn main() {
             Response::Square { msg, ttl } => Ok((msg, Duration::milliseconds(ttl as i64))),
             Response::Error { error } => Err(error),
         }
-    });
+    };
+    let square_cache = cache.cache_fn(square);
     println!("the square of {} is {:?}", 30, square_cache(30).await);
     println!("the square of {} is {:?}", 30, square_cache(30).await);
 }

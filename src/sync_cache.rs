@@ -9,8 +9,7 @@ use std::hash::Hash;
 pub struct SyncCache<Key: Eq + Hash, Val> {
     // Map of the key to the cached value and the expiry
     map: HashMap<Key, (Val, DateTime<Utc>)>,
-    // Sorted map from expiry date to a list of keys expiring at that time
-    // TODO bucket the expiries into groups for more efficient removal
+    // Priority queue tracking keys' expiry times
     expiries: PriorityQueue<Key, Reverse<DateTime<Utc>>>,
 }
 
@@ -27,6 +26,7 @@ where
     }
 
     #[inline]
+    // Note: this creates a HashMap and a PriorityQueue each with the given capacity
     pub fn with_capacity(capacity: usize) -> Self {
         SyncCache {
             map: HashMap::with_capacity(capacity),
@@ -66,9 +66,8 @@ where
     }
 
     // Insert the given key and value.
+    //
     // If the cache is at capacity, the item expiring soonest will be evicted.
-    // TODO if you set a value to a lower ttl than it was before, should
-    // we respect the longest one or the most recent one?
     pub fn set(&mut self, key: Key, value: Val, ttl: Duration) -> bool {
         // Round the date down to the nearest 10 milliseconds
         let expiry = (Utc::now() + ttl)
