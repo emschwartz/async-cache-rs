@@ -38,6 +38,10 @@ where
     }
 
     // Returns the value corresponding to the given key if it is in the cache.
+    //
+    // If the cache has expired values, it will first acquire a write lock,
+    // remove the expired values, and then return the result for the given key.
+    //
     // Note that this returns a cloned value instead of a reference because
     // the value in the map may be expired and removed before the return value is used.
     // To avoid cloning objects that are expensive to clone, simply wrap
@@ -50,13 +54,13 @@ where
         {
             let cache = self.cache.read().await;
             if !cache.has_expired_items() {
-                return cache.get(key).map(|val| val.clone());
+                return cache.get(key).cloned();
             }
         }
 
         let mut cache = self.cache.write().await;
         cache.remove_expired_items();
-        cache.get(key).map(|val| val.clone())
+        cache.get(key).cloned()
     }
 
     #[inline]
@@ -86,12 +90,13 @@ where
         move |key| {
             let cache = cache.clone();
             Box::pin(async move {
-                {
-                    if let Some(val) = cache.read().await.get(&key) {
-                        return Ok(val.clone());
-                    }
+                // Try getting the value from the cache fist
+                if let Some(val) = cache.read().await.get(&key) {
+                    return Ok(val.clone());
                 }
 
+                // If the result wasn't already in the cache, call the function
+                // and store the result in the cache (as long as the function did not error)
                 let (val, ttl) = f(key.clone()).await?;
                 cache.write().await.set(key, val.clone(), ttl);
                 Ok(val)
