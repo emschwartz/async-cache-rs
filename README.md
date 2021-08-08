@@ -24,7 +24,7 @@ This implementation keeps two copies of the `Key` per object, as well as a UTC t
 
 ### Lazy vs Proactive Expiry
 
-The `AsyncCache` lazily removes expired keys after a `get` call is made. If the cache is not under frequent use, this may lead to expired objects staying in memory for longer than necessary and a proactive expiry strategy using a background task may be preferable.
+The `AsyncCache` lazily removes expired keys when a `get` call is made for a key that is expired. This means that expired objects may stay in memory for significantly longer than necessary. An alternative approach would be to create a background task that removes expired keys as soon as they expire.
 
 ### Eviction Strategy
 

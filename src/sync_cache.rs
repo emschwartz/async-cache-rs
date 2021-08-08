@@ -60,6 +60,11 @@ where
         self.map.get(key).map(|(val, _)| val)
     }
 
+    #[inline]
+    pub(crate) fn get_with_expiry(&self, key: &Key) -> Option<&(Val, DateTime<Utc>)> {
+        self.map.get(key)
+    }
+
     // Insert the given key and value.
     // If the cache is at capacity, the item expiring soonest will be evicted.
     // TODO if you set a value to a lower ttl than it was before, should

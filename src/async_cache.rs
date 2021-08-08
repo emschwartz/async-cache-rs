@@ -1,5 +1,5 @@
 use crate::sync_cache::SyncCache;
-use chrono::Duration;
+use chrono::{Duration, Utc};
 use std::future::Future;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -39,8 +39,8 @@ where
 
     // Returns the value corresponding to the given key if it is in the cache.
     //
-    // If the cache has expired values, it will first acquire a write lock,
-    // remove the expired values, and then return the result for the given key.
+    // If the value is already expired, it will obtain a write lock,
+    // remove the expired entries from the cache, and then return None.
     //
     // Note that this returns a cloned value instead of a reference because
     // the value in the map may be expired and removed before the return value is used.
@@ -48,19 +48,16 @@ where
     // those objects in an Arc.
     #[inline]
     pub async fn get(&self, key: &Key) -> Option<Val> {
-        // TODO as soon as a single key expires, every get command will try to get a write lock unnecessarily
-        // only one actually needs to
-        // also, this does not guarantee that stale data cannot be read if there is read/write contention
-        {
-            let cache = self.cache.read().await;
-            if !cache.has_expired_items() {
-                return cache.get(key).cloned();
+        let cache = self.cache.read().await;
+        if let Some((val, expiry)) = cache.get_with_expiry(key) {
+            if expiry > &Utc::now() {
+                return Some(val.clone());
+            } else {
+                let mut cache = self.cache.write().await;
+                cache.remove_expired_items();
             }
         }
-
-        let mut cache = self.cache.write().await;
-        cache.remove_expired_items();
-        cache.get(key).cloned()
+        None
     }
 
     #[inline]
@@ -86,6 +83,16 @@ where
     #[inline]
     pub async fn is_empty(&self) -> bool {
         self.cache.read().await.is_empty()
+    }
+
+    #[inline]
+    pub async fn has_expired_items(&self) -> bool {
+        self.cache.read().await.has_expired_items()
+    }
+
+    #[inline]
+    pub async fn remove_expired_items(&self) -> bool {
+        self.cache.write().await.remove_expired_items()
     }
 
     // Returns a version of the given function that caches the return values
