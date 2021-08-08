@@ -490,9 +490,9 @@ name = "oso-async-cache"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "priority-queue",
  "reqwest",
  "serde",
- "skiplist",
  "tokio",
 ]
 
@@ -550,6 +550,16 @@ name = "ppv-lite86"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
+
+[[package]]
+name = "priority-queue"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e1340009a04e81f656a4e45e295f0b1191c81de424bf940c865e33577a8e223"
+dependencies = [
+ "autocfg",
+ "indexmap",
+]
 
 [[package]]
 name = "proc-macro2"
@@ -757,15 +767,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e51e73328dc4ac0c7ccbda3a494dfa03df1de2f46018127f60c693f2648455b0"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "skiplist"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa37347a2b4609765d113afe55f16636ccd42dadc1ad0d29030908d1bac4c95b"
-dependencies = [
- "rand",
 ]
 
 [[package]]

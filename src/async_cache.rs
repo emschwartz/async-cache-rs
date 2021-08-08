@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Clone)]
-pub struct AsyncCache<Key, Val> {
+pub struct AsyncCache<Key: Eq + Hash, Val> {
     cache: Arc<RwLock<SyncCache<Key, Val>>>,
     _key: PhantomData<Key>,
     _val: PhantomData<Val>,

@@ -1,16 +1,17 @@
 use chrono::{DateTime, Duration, DurationRound, Utc};
-use skiplist::SkipMap;
+use priority_queue::PriorityQueue;
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::hash::Hash;
 
 // Synchronous, non-thread-safe cache backed by a HashMap
 // and a SkipList of key expirations
-pub struct SyncCache<Key, Val> {
+pub struct SyncCache<Key: Eq + Hash, Val> {
     // Map of the key to the cached value and the expiry
     map: HashMap<Key, (Val, DateTime<Utc>)>,
     // Sorted map from expiry date to a list of keys expiring at that time
     // TODO bucket the expiries into groups for more efficient removal
-    expiries: SkipMap<DateTime<Utc>, Vec<Key>>,
+    expiries: PriorityQueue<Key, Reverse<DateTime<Utc>>>,
 }
 
 impl<Key, Val> SyncCache<Key, Val>
@@ -21,7 +22,7 @@ where
     pub fn new() -> Self {
         SyncCache {
             map: HashMap::new(),
-            expiries: SkipMap::new(),
+            expiries: PriorityQueue::new(),
         }
     }
 
@@ -29,7 +30,7 @@ where
     pub fn with_capacity(capacity: usize) -> Self {
         SyncCache {
             map: HashMap::with_capacity(capacity),
-            expiries: SkipMap::new(),
+            expiries: PriorityQueue::with_capacity(capacity),
         }
     }
 
@@ -69,50 +70,28 @@ where
             .duration_trunc(Duration::milliseconds(10))
             .unwrap();
 
-        // Remove the previous expiry if there was one
-        let had_key = if let Some((_, expiry)) = self.map.get(&key) {
-            if let Some(key_list) = self.expiries.get_mut(&expiry) {
-                if let Some(index) = key_list.iter().position(|k| *k == key) {
-                    key_list.remove(index);
-                }
-            };
-            true
-        } else {
-            false
-        };
-
         // If the map is at capacity, evict one entry before inserting
+        let had_key = self.map.contains_key(&key);
         if !had_key && self.map.len() == self.map.capacity() {
             self.evict();
         }
 
         self.map.insert(key.clone(), (value, expiry.clone()));
-
-        // Insert into the expiry map (or add the key to the list of keys
-        // expiring at that time, if there are already other keys expiring then)
-        if let Some(keys) = self.expiries.get_mut(&expiry) {
-            keys.push(key);
-        } else {
-            self.expiries.insert(expiry, vec![key]);
-        }
+        self.expiries.push(key, Reverse(expiry));
 
         had_key
     }
 
     #[inline]
     pub fn remove(&mut self, key: &Key) -> bool {
-        if let Some((_, expiry)) = self.map.remove(&key) {
-            self.expiries.remove(&expiry);
-            true
-        } else {
-            false
-        }
+        self.expiries.remove(key);
+        self.map.remove(&key).is_some()
     }
 
     #[inline]
     pub fn has_expired_items(&self) -> bool {
-        if let Some((expiry, _)) = self.expiries.front() {
-            expiry <= &Utc::now()
+        if let Some((_, expiry)) = self.expiries.peek() {
+            expiry.0 <= Utc::now()
         } else {
             false
         }
@@ -121,13 +100,9 @@ where
     pub fn remove_expired_items(&mut self) -> bool {
         let mut removed_items = false;
         while self.has_expired_items() {
-            let (_, expired) = self.expiries.pop_front().unwrap();
-
-            // Remove each expired key from the map
-            for key in expired.iter() {
-                if self.map.remove(&key).is_some() {
-                    removed_items = true;
-                }
+            let (key, _) = self.expiries.pop().unwrap();
+            if self.map.remove(&key).is_some() {
+                removed_items = true;
             }
         }
         removed_items
@@ -138,21 +113,7 @@ where
     // only remove one of them.
     #[inline]
     fn evict(&mut self) {
-        let key = if let Some((_, key_list)) = self.expiries.front_mut() {
-            let key = key_list.pop();
-
-            // If there was only one key expiring at this time, remove
-            // the entry from the expiries
-            if key_list.is_empty() {
-                drop(key_list);
-                self.expiries.pop_front();
-            }
-            key
-        } else {
-            None
-        };
-
-        if let Some(key) = key {
+        if let Some((key, _)) = self.expiries.pop() {
             self.map.remove(&key);
         }
     }
@@ -237,8 +198,6 @@ mod tests {
         cache.set("a", 1, Duration::hours(-1));
         cache.set("b", 2, Duration::hours(-1));
         cache.set("c", 3, Duration::hours(1));
-        assert_eq!(cache.expiries.len(), 2);
-        assert_eq!(cache.expiries.front().unwrap().1.len(), 2);
 
         assert_eq!(cache.remove_expired_items(), true);
         assert_eq!(cache.len(), 1);

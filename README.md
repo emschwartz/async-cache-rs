@@ -14,7 +14,7 @@ The [`AsyncCache`](./src/async_cache.rs) wraps a synchronous cache with Tokio's 
 
 `AsyncCache.cache_fn` wraps a given function that takes some input and returns a `Future` whose output type is `Result<(Val, Duration), ErrType>`. This provides flexibility for the user to integrate the library into their application in a way that makes sense for their context. The wrapping function will return `Result<Val, ErrType>` and use the `Duration` to determine how long the value should be cached for. Error values are not cached (to cache all or certain types of errors, the `Val` type can be set to a `Result`).
 
-The [`SyncCache`](./src/sync_cache.rs) supports setting items with individual TTLs. It stores values in a `HashMap` and keeps a sorted map (using a [`SkipMap`](https://docs.rs/skiplist/0.4.0/skiplist/skipmap/struct.SkipMap.html)) of key expiry times for efficiently checking for and removing expired items.
+The [`SyncCache`](./src/sync_cache.rs) supports setting items with individual TTLs. It stores values in a `HashMap` and keeps a `PriorityQueue` of key expiry times for efficiently checking for and removing expired items.
 
 ## Considerations
 
