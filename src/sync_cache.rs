@@ -45,6 +45,11 @@ where
     }
 
     #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    #[inline]
     pub fn capacity(&self) -> usize {
         self.map.capacity()
     }
@@ -165,6 +170,19 @@ mod tests {
 
         assert_eq!(cache.get(&"a"), Some(&1));
         assert_eq!(cache.get(&"b"), Some(&2));
+    }
+
+    #[test]
+    fn overwriting_key() {
+        let mut cache = SyncCache::with_capacity(5);
+        cache.set("a", 1, Duration::hours(1));
+        cache.set("a", 2, Duration::hours(1));
+
+        assert_eq!(cache.get(&"a"), Some(&2));
+
+        // even if the duration is shorter
+        cache.set("a", 3, Duration::seconds(10));
+        assert_eq!(cache.get(&"a"), Some(&3));
     }
 
     #[test]

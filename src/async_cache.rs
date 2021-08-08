@@ -69,15 +69,30 @@ where
     }
 
     #[inline]
-    pub async fn clear(&mut self) {
+    pub async fn remove(&self, key: &Key) -> bool {
+        self.cache.write().await.remove(key)
+    }
+
+    #[inline]
+    pub async fn clear(&self) {
         self.cache.write().await.clear()
+    }
+
+    #[inline]
+    pub async fn len(&self) -> usize {
+        self.cache.read().await.len()
+    }
+
+    #[inline]
+    pub async fn is_empty(&self) -> bool {
+        self.cache.read().await.is_empty()
     }
 
     // Returns a version of the given function that caches the return values
     // using the input as the Key and the returned Duration as the value's TTL
     pub fn cache_fn<'a, Fut, ErrType>(
         &self,
-        f: fn(Key) -> Fut,
+        f: impl Fn(Key) -> Fut + 'a,
     ) -> impl Fn(Key) -> Pin<Box<dyn Future<Output = Result<Val, ErrType>> + 'a>> + 'a
     where
         Key: 'a,
@@ -86,9 +101,12 @@ where
         // TODO maybe define a trait like GetTtl on the return type instead of requiring it to be a tuple
         Fut: Future<Output = Result<(Val, Duration), ErrType>> + 'static,
     {
+        let f = Arc::new(f);
         let cache = self.cache.clone();
         move |key| {
             let cache = cache.clone();
+            let f = f.clone();
+
             Box::pin(async move {
                 // Try getting the value from the cache fist
                 if let Some(val) = cache.read().await.get(&key) {
@@ -102,5 +120,67 @@ where
                 Ok(val)
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::spawn;
+
+    #[tokio::test]
+    async fn basic_get_set() {
+        let cache = AsyncCache::with_capacity(5);
+        cache.set("a", 1u32, Duration::milliseconds(200)).await;
+        assert_eq!(cache.get(&"a").await, Some(1));
+
+        spawn(async move {
+            cache.set("b", 2, Duration::seconds(10)).await;
+            assert_eq!(cache.get(&"b").await, Some(2));
+        });
+    }
+
+    #[tokio::test]
+    async fn getting_expired_value() {
+        let cache = AsyncCache::with_capacity(5);
+        // expired
+        cache.set("a", 1u32, Duration::milliseconds(-200)).await;
+        // not expired
+        cache.set("b", 2u32, Duration::milliseconds(200)).await;
+
+        assert_eq!(cache.get(&"a").await, None);
+        assert_eq!(cache.get(&"b").await, Some(2));
+    }
+
+    #[tokio::test]
+    async fn cache_fn() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let f = move |num: u32| {
+            let calls = calls_clone.clone();
+            async move {
+                if calls.fetch_add(1, Ordering::Relaxed) == 0 {
+                    Err("some error")
+                } else {
+                    Ok((format!("{}", num), Duration::seconds(10)))
+                }
+            }
+        };
+        let cache = AsyncCache::with_capacity(3);
+        let cached = cache.cache_fn(f);
+
+        // passes through error and does not cache it
+        assert_eq!(cached(1).await, Err("some error"));
+        assert_eq!(cache.is_empty().await, true);
+
+        // returns and caches ok value
+        assert_eq!(cached(1).await, Ok("1".to_string()));
+        assert_eq!(cache.get(&1).await, Some("1".to_string()));
+
+        // does not call the function again if it is cached
+        assert_eq!(cached(1).await, Ok("1".to_string()));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }
