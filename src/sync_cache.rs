@@ -1,16 +1,16 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, DurationRound, Utc};
 use skiplist::SkipMap;
-use std::collections::{HashMap, LinkedList};
+use std::collections::HashMap;
 use std::hash::Hash;
-use std::iter::{self, FromIterator};
 
+// Synchronous, non-thread-safe cache backed by a HashMap
+// and a SkipList of key expirations
 pub struct SyncCache<Key, Val> {
     // Map of the key to the cached value and the expiry
     map: HashMap<Key, (Val, DateTime<Utc>)>,
-    // Sorted map of expiry date to the key used for
-    // determining the next value to expire
+    // Sorted map from expiry date to a list of keys expiring at that time
     // TODO bucket the expiries into groups for more efficient removal
-    expiries: SkipMap<DateTime<Utc>, LinkedList<Key>>,
+    expiries: SkipMap<DateTime<Utc>, Vec<Key>>,
 }
 
 impl<Key, Val> SyncCache<Key, Val>
@@ -59,11 +59,18 @@ where
     // TODO if you set a value to a lower ttl than it was before, should
     // we respect the longest one or the most recent one?
     pub fn set(&mut self, key: Key, value: Val, ttl: Duration) -> bool {
-        let expiry = Utc::now() + ttl;
+        // Round the date down to the nearest 10 milliseconds
+        let expiry = (Utc::now() + ttl)
+            .duration_trunc(Duration::milliseconds(10))
+            .unwrap();
 
         // Remove the previous expiry if there was one
         let had_key = if let Some((_, expiry)) = self.map.get(&key) {
-            self.expiries.remove(expiry);
+            if let Some(key_list) = self.expiries.get_mut(&expiry) {
+                if let Some(index) = key_list.iter().position(|k| *k == key) {
+                    key_list.remove(index);
+                }
+            };
             true
         } else {
             false
@@ -76,20 +83,25 @@ where
 
         self.map.insert(key.clone(), (value, expiry.clone()));
 
-        // In the expiries map, keys are stored in a linked list in case there are
-        // multiple keys with the exact same expiry. In most cases, there will not
-        // already be a set of keys with the given expiry, so we can just insert
-        // the list directly. If there was a key list already with that expiry,
-        // we append that list to the one we just inserted.
-        if let Some(mut prev_key_list) = self
-            .expiries
-            .insert(expiry, LinkedList::from_iter(iter::once(key)))
-        {
-            let key_list = self.expiries.get_mut(&expiry).unwrap();
-            key_list.append(&mut prev_key_list);
+        // Insert into the expiry map (or add the key to the list of keys
+        // expiring at that time, if there are already other keys expiring then)
+        if let Some(keys) = self.expiries.get_mut(&expiry) {
+            keys.push(key);
+        } else {
+            self.expiries.insert(expiry, vec![key]);
         }
 
         had_key
+    }
+
+    #[inline]
+    pub fn remove(&mut self, key: &Key) -> bool {
+        if let Some((_, expiry)) = self.map.remove(&key) {
+            self.expiries.remove(&expiry);
+            true
+        } else {
+            false
+        }
     }
 
     #[inline]
@@ -122,7 +134,7 @@ where
     #[inline]
     fn evict(&mut self) {
         let key = if let Some((_, key_list)) = self.expiries.front_mut() {
-            let key = key_list.pop_front();
+            let key = key_list.pop();
 
             // If there was only one key expiring at this time, remove
             // the entry from the expiries
@@ -163,8 +175,10 @@ mod tests {
         cache.set("a", 1, Duration::hours(1));
         assert_eq!(cache.has_expired_items(), false);
 
-        cache.set("b", 2, Duration::milliseconds(-1));
+        cache.set("b", 2, Duration::milliseconds(-100));
         assert_eq!(cache.has_expired_items(), true);
+        cache.remove(&"b");
+        assert_eq!(cache.has_expired_items(), false);
 
         cache.set("c", 2, Duration::hours(-1));
         assert_eq!(cache.has_expired_items(), true);
@@ -178,7 +192,7 @@ mod tests {
         cache.set("c", 3, Duration::milliseconds(-1));
         cache.set("d", 4, Duration::days(1));
 
-        cache.remove_expired_items();
+        assert_eq!(cache.remove_expired_items(), true);
         assert_eq!(cache.len(), 2);
         assert_eq!(cache.get(&"a"), None);
         assert_eq!(cache.get(&"b"), Some(&2));
@@ -197,5 +211,20 @@ mod tests {
         assert_eq!(cache.len(), 3);
         assert_eq!(cache.get(&"c"), None);
         assert_eq!(cache.get(&"d"), Some(&4));
+    }
+
+    #[test]
+    fn multiple_keys_same_expiry() {
+        let mut cache = SyncCache::with_capacity(3);
+        cache.set("a", 1, Duration::hours(-1));
+        cache.set("b", 2, Duration::hours(-1));
+        cache.set("c", 3, Duration::hours(1));
+        assert_eq!(cache.expiries.len(), 2);
+        assert_eq!(cache.expiries.front().unwrap().1.len(), 2);
+
+        assert_eq!(cache.remove_expired_items(), true);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.get(&"a"), None);
+        assert_eq!(cache.get(&"b"), None);
     }
 }
