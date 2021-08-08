@@ -15,6 +15,7 @@ impl<Key, Val> SyncCache<Key, Val>
 where
     Key: Eq + Hash + Clone,
 {
+    #[inline]
     pub fn new() -> Self {
         SyncCache {
             map: HashMap::new(),
@@ -22,6 +23,7 @@ where
         }
     }
 
+    #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         SyncCache {
             map: HashMap::with_capacity(capacity),

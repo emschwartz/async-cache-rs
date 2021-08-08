@@ -19,6 +19,7 @@ where
     Key: Eq + Hash + Clone,
     Val: Clone,
 {
+    #[inline]
     pub fn new() -> Self {
         AsyncCache {
             cache: Arc::new(RwLock::new(SyncCache::new())),
@@ -27,6 +28,7 @@ where
         }
     }
 
+    #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         AsyncCache {
             cache: Arc::new(RwLock::new(SyncCache::with_capacity(capacity))),
@@ -35,6 +37,12 @@ where
         }
     }
 
+    // Returns the value corresponding to the given key if it is in the cache.
+    // Note that this returns a cloned value instead of a reference because
+    // the value in the map may be expired and removed before the return value is used.
+    // To avoid cloning objects that are expensive to clone, simply wrap
+    // those objects in an Arc.
+    #[inline]
     pub async fn get(&self, key: &Key) -> Option<Val> {
         // TODO as soon as a single key expires, every get command will try to get a write lock unnecessarily
         // only one actually needs to
@@ -51,10 +59,12 @@ where
         cache.get(key).map(|val| val.clone())
     }
 
+    #[inline]
     pub async fn set(&self, key: Key, value: Val, ttl: Duration) -> bool {
         self.cache.write().await.set(key, value, ttl)
     }
 
+    #[inline]
     pub async fn clear(&mut self) {
         self.cache.write().await.clear()
     }
