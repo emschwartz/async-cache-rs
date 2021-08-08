@@ -3,11 +3,10 @@ use skiplist::SkipMap;
 use std::{collections::HashMap, hash::Hash};
 
 pub struct SyncCache<Key, Val> {
-    // Map of the key to the cached value and the number of entries
-    // in self.expiries that point to this key.
-    // (the usize will only ever be >1 if `set` is called multiple
-    // times for the same key before the expiry of the initial `set` call)
-    map: HashMap<Key, (Val, usize)>,
+    // Map of the key to the cached value and the expiry
+    map: HashMap<Key, (Val, DateTime<Utc>)>,
+    // Sorted map of expiry date to the key used for
+    // determining the next value to expire
     // TODO bucket the expiries into groups for more efficient removal
     expiries: SkipMap<DateTime<Utc>, Key>,
 }
@@ -18,7 +17,6 @@ where
 {
     pub fn new() -> Self {
         SyncCache {
-            // TODO should we actually reserve the full capacity?
             map: HashMap::new(),
             expiries: SkipMap::new(),
         }
@@ -26,46 +24,48 @@ where
 
     pub fn with_capacity(capacity: usize) -> Self {
         SyncCache {
-            // TODO should we actually reserve the full capacity?
             map: HashMap::with_capacity(capacity),
             expiries: SkipMap::new(),
         }
     }
 
+    #[inline]
     pub fn clear(&mut self) {
         self.map.clear();
         self.expiries.clear();
     }
 
+    #[inline]
     pub fn get(&self, key: &Key) -> Option<&Val> {
         self.map.get(key).map(|(val, _)| val)
     }
 
     // Insert the given key and value.
     // If the cache is at capacity, the item expiring soonest will be evicted.
+    // TODO if you set a value to a lower ttl than it was before, should
+    // we respect the longest one or the most recent one?
+    #[inline]
     pub fn set(&mut self, key: Key, value: Val, ttl: Duration) -> bool {
-        let had_key = if let Some(entry) = self.map.get_mut(&key) {
-            // overwrite the cached value with the new one
-            entry.0 = value;
-            // increment the count of how many entries in self.expiries point to this key
-            // (because we are about to add one below)
-            entry.1 += 1;
+        let expiry = Utc::now() + ttl;
+
+        let had_key = if let Some((_, expiry)) = self.map.get(&key) {
+            self.expiries.remove(expiry);
             true
         } else {
             // if the map is at capacity, evict one entry before inserting
             if self.map.capacity() == self.map.len() {
-                self.evict();
+                self.remove_next_expiring();
             }
-            self.map.insert(key.clone(), (value, 1));
             false
         };
 
-        let expiry = Utc::now() + ttl;
+        self.map.insert(key.clone(), (value, expiry.clone()));
         self.expiries.insert(expiry, key);
 
         had_key
     }
 
+    #[inline]
     pub fn has_expired_items(&self) -> bool {
         if let Some((expiry, _)) = self.expiries.front() {
             expiry <= &Utc::now()
@@ -74,10 +74,11 @@ where
         }
     }
 
+    #[inline]
     pub fn remove_expired_items(&mut self) -> bool {
         let mut removed_items = false;
         while self.has_expired_items() {
-            if self.maybe_remove_next().is_some() {
+            if self.remove_next_expiring().is_some() {
                 removed_items = true;
             }
         }
@@ -85,35 +86,13 @@ where
     }
 
     // Removes the next expiring item and returns it.
-    // This will not actually remove the item from the map if
-    // the same key has been set again with a later expiry.
-    fn maybe_remove_next(&mut self) -> Option<(Key, Val)> {
+    #[inline]
+    fn remove_next_expiring(&mut self) -> Option<(Key, Val)> {
         if let Some((_, key)) = self.expiries.pop_front() {
-            let remaining = if let Some(entry) = self.map.get_mut(&key) {
-                entry.1.saturating_sub(1)
-            } else {
-                0
-            };
-
-            if remaining == 0 {
-                self.map.remove(&key).map(|(val, _)| (key, val))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    // Evict the item expiring soonest
-    fn evict(&mut self) -> Option<(Key, Val)> {
-        // Starting with the entry expiring next, start removing items from the expiry list
-        // and break as soon as an entry is actually removed from the map.
-        while !self.expiries.is_empty() {
-            if let Some(entry) = self.maybe_remove_next() {
-                return Some(entry);
+            if let Some((val, _)) = self.map.remove(&key) {
+                return Some((key, val));
             }
         }
-        return None;
+        None
     }
 }
